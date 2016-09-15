@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -90,7 +90,7 @@ static void adsp_loader_do(struct platform_device *pdev)
 		 * apr_modem_state to prevent loading of image twice
                  */
 		adsp_state = apr_get_modem_state();
-		if (adsp_state == APR_SUBSYS_DOWN) {
+		if (adsp_state != APR_SUBSYS_LOADED) {
 			priv = platform_get_drvdata(pdev);
 			if (!priv) {
 				dev_err(&pdev->dev,
@@ -118,7 +118,7 @@ static void adsp_loader_do(struct platform_device *pdev)
 load_adsp:
 	{
 		adsp_state = apr_get_q6_state();
-		if (adsp_state == APR_SUBSYS_DOWN) {
+		if (adsp_state != APR_SUBSYS_LOADED) {
 			priv = platform_get_drvdata(pdev);
 			if (!priv) {
 				dev_err(&pdev->dev,
@@ -158,18 +158,10 @@ static ssize_t adsp_boot_store(struct kobject *kobj,
 	sscanf(buf, "%du", &boot);
 
 	if (boot == BOOT_CMD) {
-#ifdef CONFIG_HUAWEI_KERNEL
-		pr_info("%s: going to call adsp_loader_do\n", __func__);
-#else
 		pr_debug("%s: going to call adsp_loader_do\n", __func__);
-#endif
 		adsp_loader_do(adsp_private);
 	} else if (boot == IMAGE_UNLOAD_CMD) {
-#ifdef CONFIG_HUAWEI_KERNEL
-		pr_info("%s: going to call adsp_loader_unloader\n", __func__);
-#else
 		pr_debug("%s: going to call adsp_loader_unloader\n", __func__);
-#endif
 		adsp_loader_unload(adsp_private);
 	}
 	return count;
@@ -186,9 +178,6 @@ static void adsp_loader_unload(struct platform_device *pdev)
 
 	if (priv->pil_h) {
 		dev_dbg(&pdev->dev, "%s: calling subsystem put\n", __func__);
-#ifdef CONFIG_HUAWEI_KERNEL
-		pr_info("%s: calling subsystem put\n", __func__);
-#endif
 		subsystem_put(priv->pil_h);
 		priv->pil_h = NULL;
 	}

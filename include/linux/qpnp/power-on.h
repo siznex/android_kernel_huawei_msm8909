@@ -48,10 +48,13 @@ enum pon_power_off_type {
 };
 
 enum pon_restart_reason {
-	PON_RESTART_REASON_UNKNOWN	= 0x00,
-	PON_RESTART_REASON_RECOVERY	= 0x01,
-	PON_RESTART_REASON_BOOTLOADER	= 0x02,
-	PON_RESTART_REASON_RTC		= 0x03,
+	PON_RESTART_REASON_UNKNOWN	        = 0x00,
+	PON_RESTART_REASON_RECOVERY	        = 0x01,
+	PON_RESTART_REASON_BOOTLOADER	        = 0x02,
+	PON_RESTART_REASON_RTC		        = 0x03,
+        PON_RESTART_REASON_DMVERITY_CORRUPTED   = 0x04,
+        PON_RESTART_REASON_DMVERITY_ENFORCE     = 0x05,
+        PON_RESTART_REASON_KEYS_CLEAR           = 0x06,
 };
 
 #ifdef CONFIG_QPNP_POWER_ON
@@ -85,15 +88,6 @@ static inline bool qpnp_pon_check_hard_reset_stored(void)
 {
 	return false;
 }
-#endif
-
-#ifdef CONFIG_HUAWEI_KERNEL
-enum {
-	PON_REASON_INDEX = 0,
-	POFF_REASON_INDEX,
-	WARM_REASON_INDEX,
-	MAX_REG_TYPE
-};
 #endif
 
 #endif

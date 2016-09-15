@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -27,7 +27,6 @@
 #include <soc/qcom/smd.h>
 #include <soc/qcom/smsm.h>
 #include <soc/qcom/subsystem_restart.h>
-#include <sound/hw_audio_info.h>
 
 static int msm_ipc_router_smd_xprt_debug_mask;
 module_param_named(debug_mask, msm_ipc_router_smd_xprt_debug_mask,
@@ -385,6 +384,11 @@ static void smd_xprt_close_event(struct work_struct *work)
 		container_of(xprt_work->xprt,
 			     struct msm_ipc_router_smd_xprt, xprt);
 
+	if (smd_xprtp->in_pkt) {
+		release_pkt(smd_xprtp->in_pkt);
+		smd_xprtp->in_pkt = NULL;
+	}
+	smd_xprtp->is_partial_in_pkt = 0;
 	init_completion(&smd_xprtp->sft_close_complete);
 	msm_ipc_router_xprt_notify(xprt_work->xprt,
 				IPC_ROUTER_XPRT_EVENT_CLOSE, NULL);
@@ -604,7 +608,6 @@ static void pil_vote_load_worker(struct work_struct *work)
 			IPC_RTR_ERR("%s: Failed to load %s\n",
 				__func__, peripheral);
 			vote_info->pil_handle = NULL;
-			audio_dsm_report_num(DSM_AUDIO_ADSP_SETUP_FAIL_ERROR_NO, DSM_AUDIO_MESG_FAILED_LOAD_MODEM);
 		}
 	} else {
 		vote_info->pil_handle = NULL;

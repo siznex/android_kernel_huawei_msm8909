@@ -64,7 +64,7 @@
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/unistd.h>
-#include <check_root.h>
+
 #ifndef SET_UNALIGN_CTL
 # define SET_UNALIGN_CTL(a,b)	(-EINVAL)
 #endif
@@ -311,18 +311,6 @@ out_unlock:
 	return retval;
 }
 
-
-#ifdef CONFIG_SRECORDER
-#ifdef CONFIG_POWERCOLLAPSE
-#ifndef CONFIG_KPROBES
-static void emergency_restart_prepare(char *reason)
-{
-    raw_notifier_call_chain(&emergency_reboot_notifier_list, SYS_RESTART, reason);
-}
-#endif
-#endif
-#endif /* CONFIG_SRECORDER */
-
 /**
  *	emergency_restart - reboot the system
  *
@@ -333,14 +321,6 @@ static void emergency_restart_prepare(char *reason)
  */
 void emergency_restart(void)
 {
-#ifdef CONFIG_SRECORDER
-#ifdef CONFIG_POWERCOLLAPSE
-#ifndef CONFIG_KPROBES
-    emergency_restart_prepare(NULL);
-#endif
-#endif
-#endif /* CONFIG_SRECORDER */
-
 	kmsg_dump(KMSG_DUMP_EMERG);
 	machine_emergency_restart();
 }
@@ -384,43 +364,6 @@ int unregister_reboot_notifier(struct notifier_block *nb)
 	return blocking_notifier_chain_unregister(&reboot_notifier_list, nb);
 }
 EXPORT_SYMBOL(unregister_reboot_notifier);
-
-#ifdef CONFIG_SRECORDER
-#ifdef CONFIG_POWERCOLLAPSE
-#ifndef CONFIG_KPROBES
-/**
- *	register_emergency_reboot_notifier - Register function to be called at reboot time
- *	@nb: Info about notifier function to be called
- *
- *	Registers a function with the list of functions
- *	to be called at reboot time.
- *
- *	Currently always returns zero, as blocking_notifier_chain_register()
- *	always returns zero.
- */
-int register_emergency_reboot_notifier(struct notifier_block *nb)
-{
-    return raw_notifier_chain_register(&emergency_reboot_notifier_list, nb);
-}
-EXPORT_SYMBOL(register_emergency_reboot_notifier);
-
-/**
- *	unregister_emergency_reboot_notifier - Unregister previously registered reboot notifier
- *	@nb: Hook to be unregistered
- *
- *	Unregisters a previously registered reboot
- *	notifier function.
- *
- *	Returns zero on success, or %-ENOENT on failure.
- */
-int unregister_emergency_reboot_notifier(struct notifier_block *nb)
-{
-    return raw_notifier_chain_unregister(&emergency_reboot_notifier_list, nb);
-}
-EXPORT_SYMBOL(unregister_emergency_reboot_notifier);
-#endif
-#endif
-#endif /* CONFIG_SRECORDER */
 
 /* Add backwards compatibility for stable trees. */
 #ifndef PF_NO_SETAFFINITY
@@ -690,8 +633,7 @@ SYSCALL_DEFINE2(setregid, gid_t, rgid, gid_t, egid)
 	    (egid != (gid_t) -1 && !gid_eq(kegid, old->gid)))
 		new->sgid = new->egid;
 	new->fsgid = new->egid;
-	if (!new->gid && (checkroot_setresgid(old->gid)))
-		goto error;
+
 	return commit_creds(new);
 
 error:
@@ -727,8 +669,6 @@ SYSCALL_DEFINE1(setgid, gid_t, gid)
 	else if (gid_eq(kgid, old->gid) || gid_eq(kgid, old->sgid))
 		new->egid = new->fsgid = kgid;
 	else
-		goto error;
-	if (!gid && (checkroot_setgid(old->gid)))
 		goto error;
 
 	return commit_creds(new);
@@ -834,8 +774,7 @@ SYSCALL_DEFINE2(setreuid, uid_t, ruid, uid_t, euid)
 	retval = security_task_fix_setuid(new, old, LSM_SETID_RE);
 	if (retval < 0)
 		goto error;
-	if (!new->uid && (checkroot_setresuid(old->uid)))
-		goto error;
+
 	return commit_creds(new);
 
 error:
@@ -888,8 +827,7 @@ SYSCALL_DEFINE1(setuid, uid_t, uid)
 	retval = security_task_fix_setuid(new, old, LSM_SETID_ID);
 	if (retval < 0)
 		goto error;
-	if (!uid && (checkroot_setuid(old->uid)))
-		goto error;
+
 	return commit_creds(new);
 
 error:
@@ -959,8 +897,7 @@ SYSCALL_DEFINE3(setresuid, uid_t, ruid, uid_t, euid, uid_t, suid)
 	retval = security_task_fix_setuid(new, old, LSM_SETID_RES);
 	if (retval < 0)
 		goto error;
-	if (!new->uid && (checkroot_setresuid(old->gid)))
-		goto error;
+
 	return commit_creds(new);
 
 error:
@@ -1032,8 +969,7 @@ SYSCALL_DEFINE3(setresgid, gid_t, rgid, gid_t, egid, gid_t, sgid)
 	if (sgid != (gid_t) -1)
 		new->sgid = ksgid;
 	new->fsgid = new->egid;
-	if (!new->gid && (checkroot_setresgid(old->gid)))
-		goto error;
+
 	return commit_creds(new);
 
 error:
@@ -2251,7 +2187,7 @@ static int prctl_set_vma_anon_name(unsigned long start, unsigned long end,
 			tmp = end;
 
 		/* Here vma->vm_start <= start < tmp <= (end|vma->vm_end). */
-		error = prctl_update_vma_anon_name(vma, &prev, start, end,
+		error = prctl_update_vma_anon_name(vma, &prev, start, tmp,
 				(const char __user *)arg);
 		if (error)
 			return error;
@@ -2491,12 +2427,12 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		if (arg2 != 1 || arg3 || arg4 || arg5)
 			return -EINVAL;
 
-		current->no_new_privs = 1;
+		task_set_no_new_privs(current);
 		break;
 	case PR_GET_NO_NEW_PRIVS:
 		if (arg2 || arg3 || arg4 || arg5)
 			return -EINVAL;
-		return current->no_new_privs ? 1 : 0;
+		return task_no_new_privs(current) ? 1 : 0;
 	case PR_SET_VMA:
 		error = prctl_set_vma(arg2, arg3, arg4, arg5);
 		break;

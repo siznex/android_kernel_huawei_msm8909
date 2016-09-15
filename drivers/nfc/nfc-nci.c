@@ -61,7 +61,7 @@ MODULE_DEVICE_TABLE(of, msm_match_table);
 #define MAX_QCA_REG				(116)
 /* will timeout in approx. 100ms as 10us steps */
 #define NFC_RF_CLK_FREQ			(19200000)
-#define NTF_TIMEOUT				(25)
+#define NTF_TIMEOUT				(100)
 #define	CORE_RESET_RSP_GID		(0x60)
 #define	CORE_RESET_OID			(0x00)
 #define CORE_RST_NTF_LENGTH		(0x02)
@@ -1746,8 +1746,9 @@ static int qca199x_probe(struct i2c_client *client,
 
 	/* To keep track if region2 command has been sent to controller */
 	region2_sent = false;
-	dev_err(&client->dev,
-	"nfc-nci probe: %s, probing qca1990 exited successfully\n",
+
+	dev_dbg(&client->dev,
+	"%s: probing qca1990 exited successfully\n",
 		 __func__);
 	return 0;
 

@@ -42,31 +42,6 @@ static DEFINE_RWLOCK(cpufreq_driver_lock);
 static DEFINE_MUTEX(cpufreq_governor_lock);
 static LIST_HEAD(cpufreq_policy_list);
 
-#ifdef CONFIG_HUAWEI_THERMAL
-#define HUAWEI_THERMAL_POLICY_MAX  800000
-static bool FTM_flag = false;
-static bool recovery_flag = false;
-static int __init early_parse_ftm_flag(char* p)
-{
-	if(p && !strcmp(p,"true"))
-	{
-		FTM_flag = true;
-	}
-	return 0;
-}
-early_param("huawei_ftm",early_parse_ftm_flag);
-
-static int __init early_parse_recovery_flag(char* p)
-{
-	if(p && !strcmp(p,"recovery"))
-	{
-		recovery_flag = true;
-	}
-	return 0;
-}
-early_param("androidboot.huawei_bootmode",early_parse_recovery_flag);
-#endif
-
 #ifdef CONFIG_HOTPLUG_CPU
 /*
  * This one keeps track of the previously set governor and user-set
@@ -1759,15 +1734,6 @@ int __cpufreq_driver_target(struct cpufreq_policy *policy,
 	pr_debug("target for CPU %u: %u kHz, relation %u, requested %u kHz\n",
 			policy->cpu, target_freq, relation, old_target_freq);
 
-	/*
-	 * This might look like a redundant call as we are checking it again
-	 * after finding index. But it is left intentionally for cases where
-	 * exactly same freq is called again and so we can save on few function
-	 * calls.
-	 */
-	if (target_freq == policy->cur)
-		return 0;
-
 	if (cpufreq_driver->target)
 		retval = cpufreq_driver->target(policy, target_freq, relation);
 	else if (cpufreq_driver->target_index) {
@@ -2058,14 +2024,6 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 
 	policy->min = new_policy->min;
 	policy->max = new_policy->max;
-
-#ifdef CONFIG_HUAWEI_THERMAL
-	if(FTM_flag && recovery_flag)
-	{
-		pr_info(" policy->max = %d\n",HUAWEI_THERMAL_POLICY_MAX);
-		policy->max = HUAWEI_THERMAL_POLICY_MAX;
-	}
-#endif
 
 	pr_debug("new min and max freqs are %u - %u kHz\n",
 					policy->min, policy->max);

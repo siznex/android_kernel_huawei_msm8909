@@ -47,22 +47,6 @@
 #include "sd_ops.h"
 #include "sdio_ops.h"
 
-#ifdef CONFIG_HUAWEI_SDCARD_DSM
-#include <linux/mmc/dsm_sdcard.h>
-#endif
-
-
-#ifdef CONFIG_HUAWEI_EMMC_DSM
-#include <linux/store_log.h>
-extern u64 device_index;
-
-#include <linux/mmc/dsm_emmc.h>
-#endif
-
-#ifdef CONFIG_HUAWEI_KERNEL
-#include <linux/debugfs.h>
-#endif
-
 /* If the device is not responding */
 #define MMC_CORE_TIMEOUT_MS	(10 * 60 * 1000) /* 10 minute timeout */
 
@@ -128,53 +112,6 @@ MODULE_PARM_DESC(
 			stats.bkops_level[level-1]++;			\
 		spin_unlock(&stats.lock);				\
 	} while (0);
-
-/*
-* Huawei functions, for eMMC log.
-*/
-#ifdef CONFIG_HUAWEI_KERNEL
-
-static struct dentry *dentry_mmclog;
-u64 rwlog_enable_flag = 0;   /* 0 : Disable , 1: Enable */
-u64 rwlog_index = 0;     /* device index, 0: for emmc */
-int mmc_debug_mask = 0;
-
-static int rwlog_enable_set(void *data, u64 val)
-{
-    rwlog_enable_flag = val;
-    return 0;
-}
-static int rwlog_enable_get(void *data, u64 *val)
-{
-    *val = rwlog_enable_flag;
-    return 0;
-}
-static int rwlog_index_set(void *data, u64 val)
-{
-    rwlog_index = val;
-    return 0;
-}
-static int rwlog_index_get(void *data, u64 *val)
-{
-    *val = rwlog_index;
-    return 0;
-}
-static int debug_mask_set(void *data, u64 val)
-{
-    mmc_debug_mask = (int)val;
-    return 0;
-}
-static int debug_mask_get(void *data, u64 *val)
-{
-    *val = (u64)mmc_debug_mask;
-    return 0;
-}
-
-DEFINE_SIMPLE_ATTRIBUTE(rwlog_enable_fops,rwlog_enable_get, rwlog_enable_set, "%llu\n");
-DEFINE_SIMPLE_ATTRIBUTE(rwlog_index_fops,rwlog_index_get, rwlog_index_set, "%llu\n");
-DEFINE_SIMPLE_ATTRIBUTE(debug_mask_fops,debug_mask_get, debug_mask_set, "%llu\n");
-
-#endif
 
 /*
  * Internal function. Schedule delayed work in the MMC work queue.
@@ -381,24 +318,6 @@ mmc_start_request(struct mmc_host *host, struct mmc_request *mrq)
 			 mrq->stop->arg, mrq->stop->flags);
 	}
 
-#ifdef CONFIG_HUAWEI_KERNEL
-    if(1 == rwlog_enable_flag)
-    {
-        if(mrq->cmd->opcode == MMC_WRITE_MULTIPLE_BLOCK
-            || mrq->cmd->opcode == MMC_WRITE_BLOCK
-            || mrq->cmd->opcode == MMC_READ_MULTIPLE_BLOCK
-            || mrq->cmd->opcode == MMC_READ_SINGLE_BLOCK)
-        {
-            /* only mmc rw log is output */
-            if(rwlog_index == host->index)
-            {
-                printk("%s:cmd=%d,mrq->data.blocks=%d,index=%d,arg=%x\n",__func__,
-                (int)mrq->cmd->opcode, mrq->data->blocks, host->index, mrq->cmd->arg);
-            }
-        }
-    }
-#endif
-
 	WARN_ON(!host->claimed);
 
 	mrq->cmd->error = 0;
@@ -481,7 +400,9 @@ EXPORT_SYMBOL(mmc_blk_init_bkops_statistics);
  */
 void mmc_start_delayed_bkops(struct mmc_card *card)
 {
-	if (!card || !card->ext_csd.bkops_en || mmc_card_doing_bkops(card))
+	if (!card ||
+		!(mmc_card_get_bkops_en_manual(card)) ||
+		mmc_card_doing_bkops(card))
 		return;
 
 	if (card->bkops_info.sectors_changed <
@@ -518,7 +439,7 @@ void mmc_start_bkops(struct mmc_card *card, bool from_exception)
 	int err;
 
 	BUG_ON(!card);
-	if (!card->ext_csd.bkops_en)
+	if (!(mmc_card_get_bkops_en_manual(card)))
 		return;
 
 	if ((card->bkops_info.cancel_delayed_work) && !from_exception) {
@@ -1113,18 +1034,8 @@ EXPORT_SYMBOL(mmc_start_req);
 void mmc_wait_for_req(struct mmc_host *host, struct mmc_request *mrq)
 {
 #ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
-#ifdef CONFIG_HUAWEI_KERNEL
-	/* add logs to capture cases deferred resume here */
-        if (mmc_bus_needs_resume(host)) {
-		printk("%s:sd card need resume in mmc_wait_for_req, will dump the stack.\n", mmc_hostname(host));
-		dump_stack();
-                mmc_resume_bus(host);
-	}
-
-#else
 	if (mmc_bus_needs_resume(host))
 		mmc_resume_bus(host);
-#endif
 #endif
 	__mmc_start_req(host, mrq);
 	mmc_wait_for_req_done(host, mrq);
@@ -1677,7 +1588,6 @@ void mmc_set_clock(struct mmc_host *host, unsigned int hz)
 	__mmc_set_clock(host, hz);
 	mmc_host_clk_release(host);
 }
-EXPORT_SYMBOL(mmc_set_clock);
 
 #ifdef CONFIG_MMC_CLKGATE
 /*
@@ -2050,13 +1960,8 @@ int mmc_set_signal_voltage(struct mmc_host *host, int signal_voltage)
 	mmc_host_clk_hold(host);
 	err = mmc_wait_for_cmd(host, &cmd, 0);
 	if (err)
-	{
-		if(!strcmp(mmc_hostname(host),"mmc1"))
-		{
-			pr_err("%s: send cmd11 fail, err=%d\n", mmc_hostname(host), err);
-		}
 		goto exit;
-	}
+
 	if (!mmc_host_is_spi(host) && (cmd.resp[0] & R1_ERROR)) {
 		err = -EIO;
 		goto exit;
@@ -2109,23 +2014,11 @@ int mmc_set_signal_voltage(struct mmc_host *host, int signal_voltage)
 		err = -EAGAIN;
 
 power_cycle:
-#ifdef CONFIG_HUAWEI_KERNEL
-	if (err) {
-		pr_err("%s: Signal voltage switch failed, "
-			"power cycling card\n", mmc_hostname(host));
-		mmc_power_cycle(host);
-	}
-	else
-	{
-		pr_info("%s: host and card voltage have changed into 1.8v success!\n", mmc_hostname(host));
-	}
-#else
 	if (err) {
 		pr_debug("%s: Signal voltage switch failed, "
 			"power cycling card\n", mmc_hostname(host));
 		mmc_power_cycle(host);
 	}
-#endif
 
 exit:
 	mmc_host_clk_release(host);
@@ -2197,18 +2090,7 @@ void mmc_power_up(struct mmc_host *host)
 	 * This delay should be sufficient to allow the power supply
 	 * to reach the minimum voltage.
 	 */
-
-	/*For sdcard we increase delay to 150ms to give rpm more time to operate.*/
-#ifdef CONFIG_HUAWEI_KERNEL
-	if(!strcmp(mmc_hostname(host), "mmc1")) {
-		mmc_delay(150);
-	}
-	else {
-		mmc_delay(10);
-	}
-#else
 	mmc_delay(10);
-#endif
 
 	host->ios.clock = host->f_init;
 
@@ -2312,40 +2194,6 @@ static inline void mmc_bus_put(struct mmc_host *host)
 
 int mmc_resume_bus(struct mmc_host *host)
 {
-#ifdef CONFIG_HUAWEI_KERNEL
-	unsigned long flags;
-	int err = 0;
-
-	mmc_claim_host(host);
-	spin_lock_irqsave(&host->lock, flags);
-	if (!mmc_bus_needs_resume(host)) {
-		spin_unlock_irqrestore(&host->lock, flags);
-		mmc_release_host(host);
-		return 0;
-	}
-	host->bus_resume_flags &= ~MMC_BUSRESUME_NEEDS_RESUME;
-	spin_unlock_irqrestore(&host->lock, flags);
-
-	printk("%s: Starting deferred resume\n", mmc_hostname(host));
-	mmc_bus_get(host);
-	if (host->bus_ops && !host->bus_dead) {
-		mmc_power_up(host);
-		BUG_ON(!host->bus_ops->resume);
-		err = host->bus_ops->resume(host);
-		if (err) {
-			pr_err("%s: error %d during resume "
-					    "(card was removed?)\n",
-					    mmc_hostname(host), err);
-			err = 0;
-		}
-	}
-	mmc_bus_put(host);
-	mmc_release_host(host);
-	mmc_detect_change(host, 0);
-
-	printk("%s: Deferred resume completed\n", mmc_hostname(host));
-	return 0;
-#else
 	unsigned long flags;
 
 	if (!mmc_bus_needs_resume(host))
@@ -2367,8 +2215,6 @@ int mmc_resume_bus(struct mmc_host *host)
 	mmc_bus_put(host);
 	printk("%s: Deferred resume completed\n", mmc_hostname(host));
 	return 0;
-#endif
-
 }
 
 EXPORT_SYMBOL(mmc_resume_bus);
@@ -2690,19 +2536,8 @@ static int mmc_do_erase(struct mmc_card *card, unsigned int from,
 		/* Do not retry else we can't see errors */
 		err = mmc_wait_for_cmd(card->host, &cmd, 0);
 		if (err || (cmd.resp[0] & 0xFDF92000)) {
-#ifdef CONFIG_HUAWEI_EMMC_DSM
-			if(card->host->index == device_index){
-				DSM_EMMC_LOG(card, DSM_EMMC_ERASE_ERR,
-					"%s:error %d requesting status %#x\n", __FUNCTION__,
-					err, cmd.resp[0]);
-			}
-			else
-				pr_err("error %d requesting status %#x\n",
-					err, cmd.resp[0]);
-#else
 			pr_err("error %d requesting status %#x\n",
 				err, cmd.resp[0]);
-#endif
 			err = -EIO;
 			goto out;
 		}
@@ -3425,7 +3260,6 @@ static int mmc_rescan_try_freq(struct mmc_host *host, unsigned freq)
 	pr_info("%s: %s: trying to init card at %u Hz\n",
 		mmc_hostname(host), __func__, host->f_init);
 #endif
-      printk(KERN_ERR "%s prepare to power up,at %u Hz\n",mmc_hostname(host),host->f_init);
 	mmc_power_up(host);
 
 	/*
@@ -3446,41 +3280,19 @@ static int mmc_rescan_try_freq(struct mmc_host *host, unsigned freq)
 
 	/* Order's important: probe SDIO, then SD, then MMC */
 	if (!mmc_attach_sdio(host))
-	{
-	      printk(KERN_ERR "%s attach sdio success\n",mmc_hostname(host));
 		return 0;
-	}
 	if (!mmc_attach_sd(host))
-	{
-	      printk(KERN_ERR "%s attach sd success\n",mmc_hostname(host));
 		return 0;
-	}
 	if (!mmc_attach_mmc(host))
-	{
-	      printk(KERN_ERR "%s attach mmc success\n",mmc_hostname(host));
 		return 0;
-	}
 
 	mmc_power_off(host);
-	printk(KERN_ERR "%s attach failed!!\n",mmc_hostname(host));
 	return -EIO;
 }
 
 int _mmc_detect_card_removed(struct mmc_host *host)
 {
 	int ret;
-
-#ifdef CONFIG_HUAWEI_SDCARD_DSM
-	int i;
-
-	if(!strcmp(mmc_hostname(host), "mmc1"))
-	{
-		for(i=0; i< DSM_SDCARD_CMD_MAX; i++)
-		{
-			dsm_sdcard_cmd_logs[i].value = 0;
-		}
-	}
-#endif
 
 	if ((host->caps & MMC_CAP_NONREMOVABLE) || !host->bus_ops->alive)
 		return 0;
@@ -3607,12 +3419,6 @@ void mmc_rescan(struct work_struct *work)
 		goto out;
 	}
 
-#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
-	if (mmc_bus_needs_resume(host)) {
-		goto out;
-	}
-#endif
-
 	mmc_rpm_hold(host, &host->class_dev);
 	mmc_claim_host(host);
 	if (!mmc_rescan_try_freq(host, host->f_min))
@@ -3625,12 +3431,7 @@ void mmc_rescan(struct work_struct *work)
 		wake_lock_timeout(&host->detect_wake_lock, HZ / 2);
 
 	if (host->caps & MMC_CAP_NEEDS_POLL)
-#ifdef CONFIG_HUAWEI_KERNEL
-	/*set the time of polling to five second.*/
-	mmc_schedule_delayed_work(&host->detect, (5*HZ));
-#else
-	mmc_schedule_delayed_work(&host->detect, HZ);
-#endif
+		mmc_schedule_delayed_work(&host->detect, HZ);
 }
 
 void mmc_start_host(struct mmc_host *host)
@@ -4082,9 +3883,6 @@ int mmc_pm_notify(struct notifier_block *notify_block,
 
 		spin_lock_irqsave(&host->lock, flags);
 		if (mmc_bus_manual_resume(host)) {
-#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
-			host->rescan_disable = 0;
-#endif
 			spin_unlock_irqrestore(&host->lock, flags);
 			break;
 		}
@@ -4212,19 +4010,6 @@ static int __init mmc_init(void)
 	ret = sdio_register_bus();
 	if (ret)
 		goto unregister_host_class;
-
-#ifdef CONFIG_HUAWEI_KERNEL
-    dentry_mmclog = debugfs_create_dir("hw_mmclog", NULL);
-    if(dentry_mmclog )
-    {
-        debugfs_create_file("rwlog_enable", S_IFREG|S_IRWXU|S_IRGRP|S_IROTH,
-            dentry_mmclog, NULL, &rwlog_enable_fops);
-        debugfs_create_file("rwlog_index", S_IFREG|S_IRWXU|S_IRGRP|S_IROTH,
-            dentry_mmclog, NULL, &rwlog_index_fops);
-        debugfs_create_file("debug_mask", S_IFREG|S_IRWXU|S_IRGRP|S_IROTH,
-            dentry_mmclog, NULL, &debug_mask_fops);
-    }
-#endif
 
 	return 0;
 

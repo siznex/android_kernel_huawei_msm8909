@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -44,10 +44,6 @@
 
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
-
-#ifdef CONFIG_HUAWEI_KERNEL
-extern bool huawei_cam_is_factory_mode(void);
-#endif
 
 static struct msm_cam_clk_info csid_clk_info[CSID_NUM_CLK_MAX];
 static struct msm_cam_clk_info csid_clk_src_info[CSID_NUM_CLK_MAX];
@@ -222,34 +218,12 @@ static irqreturn_t msm_csid_irq(int irq_num, void *data)
 	}
 	irq = msm_camera_io_r(csid_dev->base +
 		csid_dev->ctrl_reg->csid_reg.csid_irq_status_addr);
-
-#ifdef CONFIG_HUAWEI_KERNEL
-	if(huawei_cam_is_factory_mode() || csid_dev->csid_sof_debug == 1)
-	{
-		if(csid_dev->pdev)
-		{
-			pr_err("%s CSID%d_IRQ_STATUS_ADDR = 0x%x\n",
-				   __func__, csid_dev->pdev->id, irq);
-		}
-		else
-		{
-			pr_err("%s:%d csid_dev->pdev NULL\n", __func__, __LINE__);
-		}
-	}
-	else
-	{
-		CDBG("%s CSID%d_IRQ_STATUS_ADDR = 0x%x\n",
-			 __func__, csid_dev->pdev->id, irq);
-	}
-#else
 	if (csid_dev->csid_sof_debug == 1)
 		pr_err("%s CSID%d_IRQ_STATUS_ADDR = 0x%x\n",
 			 __func__, csid_dev->pdev->id, irq);
 	else
 		CDBG("%s CSID%d_IRQ_STATUS_ADDR = 0x%x\n",
 			 __func__, csid_dev->pdev->id, irq);
-#endif
-
 	if (irq & (0x1 <<
 		csid_dev->ctrl_reg->csid_reg.csid_rst_done_irq_bitshift))
 		complete(&csid_dev->reset_complete);
@@ -275,18 +249,7 @@ static int msm_csid_irq_routine(struct v4l2_subdev *sd, u32 status,
 {
 	struct csid_device *csid_dev = v4l2_get_subdevdata(sd);
 	irqreturn_t ret;
-#ifdef CONFIG_HUAWEI_KERNEL
-	if(huawei_cam_is_factory_mode())
-	{
-		pr_err("%s E\n", __func__);
-	}
-	else
-	{
-		CDBG("%s E\n", __func__);
-	}
-#else
 	CDBG("%s E\n", __func__);
-#endif
 	ret = msm_csid_irq(csid_dev->irq->start, csid_dev);
 	*handled = TRUE;
 	return 0;
@@ -555,7 +518,7 @@ static int32_t msm_csid_cmd(struct csid_device *csid_dev, void __user *arg)
 			break;
 		}
 		if (csid_params.lut_params.num_cid < 1 ||
-			csid_params.lut_params.num_cid > 16) {
+			csid_params.lut_params.num_cid > MAX_CID) {
 			pr_err("%s: %d num_cid outside range\n",
 				 __func__, __LINE__);
 			rc = -EINVAL;
@@ -584,6 +547,10 @@ static int32_t msm_csid_cmd(struct csid_device *csid_dev, void __user *arg)
 			csid_params.lut_params.vc_cfg[i] = vc_cfg;
 		}
 		csid_dev->csid_sof_debug = 0;
+		if (rc < 0) {
+			pr_err("%s:%d failed\n", __func__, __LINE__);
+			break;
+		}
 		rc = msm_csid_config(csid_dev, &csid_params);
 		for (i--; i >= 0; i--)
 			kfree(csid_params.lut_params.vc_cfg[i]);
@@ -695,7 +662,7 @@ static int32_t msm_csid_cmd32(struct csid_device *csid_dev, void __user *arg)
 		csid_params.lut_params.num_cid = lut_par32.num_cid;
 
 		if (csid_params.lut_params.num_cid < 1 ||
-			csid_params.lut_params.num_cid > 16) {
+			csid_params.lut_params.num_cid > MAX_CID) {
 			pr_err("%s: %d num_cid outside range\n",
 				 __func__, __LINE__);
 			rc = -EINVAL;

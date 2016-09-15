@@ -72,11 +72,7 @@
 #define FB_TYPE_3D_PANEL 0x10101010
 #define MDP_IMGTYPE2_START 0x10000
 #define MSMFB_DRIVER_VERSION	0xF9E8D701
-/*Add display color inversion function*/
-#ifdef CONFIG_HUAWEI_LCD
-#define MSMFB_DISPLAY_INVERSION	_IOWR(MSMFB_IOCTL_MAGIC, 253, unsigned  int)
-#define MSMFB_AUTO_CABC           _IOWR(MSMFB_IOCTL_MAGIC, 255, struct msmfb_cabc_config)
-#endif
+
 /* HW Revisions for different MDSS targets */
 #define MDSS_GET_MAJOR(rev)		((rev) >> 28)
 #define MDSS_GET_MINOR(rev)		(((rev) >> 16) & 0xFFF)
@@ -184,6 +180,13 @@ enum {
 	HSIC_INT,
 	HSIC_CON,
 	NUM_HSIC_PARAM,
+};
+
+enum mdss_mdp_max_bw_mode {
+	MDSS_MAX_BW_LIMIT_DEFAULT = 0x1,
+	MDSS_MAX_BW_LIMIT_CAMERA = 0x2,
+	MDSS_MAX_BW_LIMIT_HFLIP = 0x4,
+	MDSS_MAX_BW_LIMIT_VFLIP = 0x8,
 };
 
 #define MDSS_MDP_ROT_ONLY		0x80
@@ -543,6 +546,7 @@ enum mdss_mdp_blend_op {
 	BLEND_OP_MAX,
 };
 
+#define DECIMATED_DIMENSION(dim, deci) (((dim) + ((1 << (deci)) - 1)) >> (deci))
 #define MAX_PLANES	4
 struct mdp_scale_data {
 	uint8_t enable_pxl_ext;
@@ -1140,12 +1144,6 @@ struct mdp_page_protection {
 };
 
 
-#ifdef CONFIG_HUAWEI_LCD
-enum inversion_mode {
-	COLUMN_INVERSION = 0,
-	DOT_INVERSION = 2,
-};
-#endif
 struct mdp_mixer_info {
 	int pndx;
 	int pnum;
@@ -1153,20 +1151,6 @@ struct mdp_mixer_info {
 	int mixer_num;
 	int z_order;
 };
-
-#ifdef CONFIG_HUAWEI_LCD
-enum cabc_mode {
-	CABC_MODE_OFF,
-	CABC_MODE_UI,
-	CABC_MODE_STILL,
-	CABC_MODE_MOVING,
-};
-struct msmfb_cabc_config {
-	uint32_t mode;
-	uint32_t dimming_on;
-	uint32_t mov_det_on;
-};
-#endif
 
 #define MAX_PIPE_PER_MIXER  7
 

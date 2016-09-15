@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -49,7 +49,7 @@
 #define MODE_4GV_NW		0xE
 #define MODE_G711		0xA
 #define MODE_G711A		0xF
-#define RX_PATH_MUTE 1
+
 enum msm_audio_g711a_frame_type {
 	MVS_G711A_SPEECH_GOOD,
 	MVS_G711A_SID,
@@ -288,41 +288,7 @@ static int msm_voip_dtx_mode_get(struct snd_kcontrol *kcontrol,
 
 	return 0;
 }
-/* add for CVAA */
-static int msm_voip_rx_device_mute_get(struct snd_kcontrol *kcontrol,
-					struct snd_ctl_elem_value *ucontrol)
-{
-	ucontrol->value.integer.value[0] =
-		voc_get_rx_device_mute(voc_get_session_id(VOIP_SESSION_NAME));
-	return 0;
-}
 
-static int msm_voip_rx_device_mute_put(struct snd_kcontrol *kcontrol,
-					struct snd_ctl_elem_value *ucontrol)
-{
-	int ret = 0;
-	int mute = ucontrol->value.integer.value[0];
-	//uint32_t session_id = ucontrol->value.integer.value[1];
-	int ramp_duration = ucontrol->value.integer.value[1];
-
-	pr_debug("%s: mute=%d\n", __func__, mute);
-
-	if ((mute < 0) || (mute > 1) || (ramp_duration < 0)
-		|| (ramp_duration > MAX_RAMP_DURATION)) {
-		pr_err(" %s Invalid arguments", __func__);
-
-		ret = -EINVAL;
-		goto done;
-	}
-
-	pr_err("%s: mute=%d ramp_duration=%d\n", __func__,mute, ramp_duration);
-
-	voc_set_device_mute(voc_get_session_id(VOIP_SESSION_NAME), RX_PATH_MUTE,
-			    mute, ramp_duration);
-
-done:
-	return ret;
-}
 static struct snd_kcontrol_new msm_voip_controls[] = {
 	SOC_SINGLE_MULTI_EXT("Voip Tx Mute", SND_SOC_NOPM, 0,
 			     MAX_RAMP_DURATION,
@@ -340,10 +306,6 @@ static struct snd_kcontrol_new msm_voip_controls[] = {
 			     msm_voip_evrc_min_max_rate_config_put),
 	SOC_SINGLE_EXT("Voip Dtx Mode", SND_SOC_NOPM, 0, 1, 0,
 		       msm_voip_dtx_mode_get, msm_voip_dtx_mode_put),
-	SOC_SINGLE_MULTI_EXT("Voip Rx Device Mute", SND_SOC_NOPM, 0,
-		             MAX_RAMP_DURATION,
-		             0, 2,msm_voip_rx_device_mute_get,
-		             msm_voip_rx_device_mute_put),
 };
 
 static int msm_pcm_voip_probe(struct snd_soc_platform *platform)
@@ -532,7 +494,11 @@ static void voip_process_ul_pkt(uint8_t *voc_pkt,
 		pr_debug("%s: pkt_len =%d, frame.pktlen=%d, timestamp=%d\n",
 			 __func__, pkt_len, buf_node->frame.pktlen, timestamp);
 
-		prtd->pcm_capture_irq_pos += prtd->pcm_capture_count;
+		if (prtd->mode == MODE_PCM)
+			prtd->pcm_capture_irq_pos += buf_node->frame.pktlen;
+		else
+			prtd->pcm_capture_irq_pos += prtd->pcm_capture_count;
+
 		spin_unlock_irqrestore(&prtd->dsp_ul_lock, dsp_flags);
 		snd_pcm_period_elapsed(prtd->capture_substream);
 	} else {
@@ -694,7 +660,11 @@ static void voip_process_dl_pkt(uint8_t *voc_pkt, void *private_data)
 		pr_debug("%s: frame.pktlen=%d\n", __func__,
 			 buf_node->frame.pktlen);
 
-		prtd->pcm_playback_irq_pos += prtd->pcm_count;
+		if (prtd->mode == MODE_PCM)
+			prtd->pcm_playback_irq_pos += buf_node->frame.pktlen;
+		else
+			prtd->pcm_playback_irq_pos += prtd->pcm_count;
+
 		spin_unlock_irqrestore(&prtd->dsp_lock, dsp_flags);
 		snd_pcm_period_elapsed(prtd->playback_substream);
 	} else {

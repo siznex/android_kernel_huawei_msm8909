@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -55,9 +55,7 @@ struct mdp3_session_data {
 	atomic_t dma_done_cnt;
 	int histo_status;
 	struct mutex histo_lock;
-	struct mutex pp_lock;
 	int lut_sel;
-	int cc_vect_sel;
 	bool vsync_before_commit;
 	bool first_commit;
 	int clk_on;
@@ -75,7 +73,5 @@ struct mdp3_session_data {
 };
 
 int mdp3_ctrl_init(struct msm_fb_data_type *mfd);
-#ifdef CONFIG_HUAWEI_LCD
-void mdss_dsi_status_check_ctl(struct msm_fb_data_type *mfd, int sheduled);
-#endif
+
 #endif /* MDP3_CTRL_H */

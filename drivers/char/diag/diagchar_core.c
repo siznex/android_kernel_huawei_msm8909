@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -144,14 +144,10 @@ module_param(poolsize_qsc_usb, uint, 0);
 static unsigned int max_clients = 15;
 static unsigned int threshold_client_limit = 30;
 module_param(max_clients, uint, 0);
-#ifdef CONFIG_HUAWEI_KERNEL
-int diag_max_reg = 850;
-int diag_threshold_reg = 1000;
-#else
+
 /* This is the maximum number of pkt registrations supported at initialization*/
 int diag_max_reg = 600;
 int diag_threshold_reg = 750;
-#endif
 
 /* Timer variables */
 static struct timer_list drain_timer;
@@ -332,21 +328,28 @@ fail:
 	return -ENOMEM;
 }
 
-static int diagchar_close(struct inode *inode, struct file *file)
+
+static int diag_remove_client_entry(struct file *file)
 {
 	int i = -1;
-	struct diagchar_priv *diagpriv_data = file->private_data;
+	struct diagchar_priv *diagpriv_data = NULL;
 	struct diag_dci_client_tbl *dci_entry = NULL;
 	unsigned long flags;
 
-	pr_debug("diag: process exit %s\n", current->comm);
-	if (!(file->private_data)) {
-		pr_alert("diag: Invalid file pointer");
+	if(!driver)
 		return -ENOMEM;
+
+	mutex_lock(&driver->diag_file_mutex);
+	if (!file) {
+		mutex_unlock(&driver->diag_file_mutex);
+		return -ENOENT;
+	}
+	if (!(file->private_data)) {
+		mutex_unlock(&driver->diag_file_mutex);
+		return -EINVAL;
 	}
 
-	if (!driver)
-		return -ENOMEM;
+	diagpriv_data = file->private_data;
 
 	/* clean up any DCI registrations, if this is a DCI client
 	* This will specially help in case of ungraceful exit of any DCI client
@@ -391,38 +394,6 @@ static int diagchar_close(struct inode *inode, struct file *file)
 				      ALL_PROC);
 		diag_switch_logging(USB_MODE);
 	}
-#ifdef CONFIG_HUAWEI_FEATURE_DIAG_MDLOG
-	if (driver->mixed_qmdlog_pid == current->tgid)
-	{
-		driver->mixed_qmdlog_flag = 0;
-		driver->mixed_qmdlog_pid = 0;
-		/*when usb qxdm port used, clear the in_busy_file_x flag*/
-		if (driver->usb_connected) {
-			for (i = 0; i < NUM_SMD_DATA_CHANNELS; i++) {
-				driver->smd_data[i].md_in_busy_1 = 0;
-				driver->smd_data[i].md_in_busy_2 = 0;
-				driver->smd_data[i].usb_in_busy_1 = 0;
-				driver->smd_data[i].usb_in_busy_2 = 0;
-				driver->smd_data[i].in_busy_1 = 0;
-				driver->smd_data[i].in_busy_2 = 0;
-			}
-
-			if (driver->supports_separate_cmdrsp) {
-				for (i = 0; i < NUM_SMD_CMD_CHANNELS; i++) {
-					driver->smd_cmd[i].md_in_busy_1 = 0;
-					driver->smd_cmd[i].md_in_busy_2 = 0;
-					driver->smd_cmd[i].usb_in_busy_1 = 0;
-					driver->smd_cmd[i].usb_in_busy_2 = 0;
-					driver->smd_cmd[i].in_busy_1 = 0;
-					driver->smd_cmd[i].in_busy_2 = 0;
-				}
-			}
-		}
-		diag_update_proc_vote(DIAG_PROC_MEMORY_DEVICE, VOTE_DOWN, ALL_PROC);
-		queue_work(driver->diag_real_time_wq,
-						&driver->diag_real_time_work);
-	}
-#endif
 #endif /* DIAG over USB */
 	/* Delete the pkt response table entry for the exiting process */
 	for (i = 0; i < diag_max_reg; i++)
@@ -440,11 +411,18 @@ static int diagchar_close(struct inode *inode, struct file *file)
 			driver->client_map[i].pid = 0;
 			kfree(diagpriv_data);
 			diagpriv_data = NULL;
+			file->private_data = 0;
 			break;
 		}
 	}
 	mutex_unlock(&driver->diagchar_mutex);
+	mutex_unlock(&driver->diag_file_mutex);
 	return 0;
+}
+
+static int diagchar_close(struct inode *inode, struct file *file)
+{
+	return diag_remove_client_entry(file);
 }
 
 int diag_find_polling_reg(int i)
@@ -728,7 +706,7 @@ static int diag_process_userspace_remote(int proc, void *buf, int len)
 	int bridge_index = proc - 1;
 
 	if (!buf || len < 0) {
-		pr_err("diag: Invalid input in %s, buf: %p, len: %d\n",
+		pr_err("diag: Invalid input in %s, buf: %pK, len: %d\n",
 		       __func__, buf, len);
 		return -EINVAL;
 	}
@@ -1444,28 +1422,6 @@ long diagchar_ioctl(struct file *filp,
 	case DIAG_IOCTL_PERIPHERAL_BUF_DRAIN:
 		result = diag_ioctl_peripheral_drain_immediate(ioarg);
 		break;
-#ifdef CONFIG_HUAWEI_FEATURE_DIAG_MDLOG
-	case DIAG_IOCTL_QXDM_LOG:
-		pr_info("%s DIAG_IOCTL_QXDM_LOG\n", __func__);
-		/*value the flag of mixed_qmdlog_flag and current user space thread tgid */
-		driver->mixed_qmdlog_flag = 1;
-		driver->mixed_qmdlog_pid = current->tgid;
-		driver->logging_process_id = current->tgid;
-		if (!driver->usb_connected)
-		{
-			int i = 0;
-			diag_reset_smd_data(RESET_AND_QUEUE);
-			for (i = 0; i < NUM_SMD_CONTROL_CHANNELS; i++) {
-				/* Poll SMD CNTL channels to check for data */
-				diag_smd_notify(&(driver->smd_cntl[i]), SMD_EVENT_DATA);
-			}
-		}
-		diag_update_proc_vote(DIAG_PROC_MEMORY_DEVICE, VOTE_UP, ALL_PROC);
-		queue_work(driver->diag_real_time_wq,
-						&driver->diag_real_time_work);
-		result = 0;
-		break;
-#endif
 	}
 	return result;
 }
@@ -1478,7 +1434,7 @@ static ssize_t diagchar_read(struct file *file, char __user *buf, size_t count,
 	int index = -1, i = 0, ret = 0;
 	int data_type;
 	int copy_dci_data = 0;
-	int exit_stat;
+	int exit_stat = 0;
 	int write_len = 0;
 
 	for (i = 0; i < driver->num_clients; i++)
@@ -1496,13 +1452,9 @@ static ssize_t diagchar_read(struct file *file, char __user *buf, size_t count,
 	wait_event_interruptible(driver->wait_q, driver->data_ready[index]);
 
 	mutex_lock(&driver->diagchar_mutex);
-#ifdef CONFIG_HUAWEI_FEATURE_DIAG_MDLOG
-	if ((driver->data_ready[index] & USER_SPACE_DATA_TYPE)
-			&& (driver->logging_mode == MEMORY_DEVICE_MODE || driver->mixed_qmdlog_flag)) {
-#else
+
 	if ((driver->data_ready[index] & USER_SPACE_DATA_TYPE) && (driver->
 					logging_mode == MEMORY_DEVICE_MODE)) {
-#endif
 		pr_debug("diag: process woken up\n");
 		/*Copy the type of data being passed*/
 		data_type = driver->data_ready[index] & USER_SPACE_DATA_TYPE;
@@ -1510,7 +1462,7 @@ static ssize_t diagchar_read(struct file *file, char __user *buf, size_t count,
 		COPY_USER_SPACE_OR_EXIT(buf, data_type, sizeof(int));
 		/* place holder for number of data field */
 		ret += sizeof(int);
-		exit_stat = diag_md_copy_to_user(buf, &ret);
+		exit_stat = diag_md_copy_to_user(buf, &ret, count);
 		goto exit;
 	} else if (driver->data_ready[index] & USER_SPACE_DATA_TYPE) {
 		/* In case, the thread wakes up and the logging mode is
@@ -1523,7 +1475,9 @@ static ssize_t diagchar_read(struct file *file, char __user *buf, size_t count,
 		data_type = driver->data_ready[index] & DEINIT_TYPE;
 		COPY_USER_SPACE_OR_EXIT(buf, data_type, 4);
 		driver->data_ready[index] ^= DEINIT_TYPE;
-		goto exit;
+		mutex_unlock(&driver->diagchar_mutex);
+		diag_remove_client_entry(file);
+		return ret;
 	}
 
 	if (driver->data_ready[index] & MSG_MASKS_TYPE) {
@@ -1692,16 +1646,6 @@ static ssize_t diagchar_write(struct file *file, const char __user *buf,
 		return -EBADMSG;
 	}
 #ifdef CONFIG_DIAG_OVER_USB
-#ifdef CONFIG_HUAWEI_FEATURE_DIAG_MDLOG
-	if (driver->logging_mode == NO_LOGGING_MODE ||
-	    (!((pkt_type == DCI_DATA_TYPE) ||
-	       ((pkt_type & (DATA_TYPE_DCI_LOG | DATA_TYPE_DCI_EVENT)) == 0))
-		&& (driver->logging_mode == USB_MODE) &&
-		(!driver->usb_connected && !driver->mixed_qmdlog_flag))) {
-		/*Drop the diag payload */
-		return -EIO;
-	}
-#else
 	if (driver->logging_mode == NO_LOGGING_MODE ||
 	    (!((pkt_type == DCI_DATA_TYPE) ||
 	       ((pkt_type & (DATA_TYPE_DCI_LOG | DATA_TYPE_DCI_EVENT)) == 0))
@@ -1710,7 +1654,6 @@ static ssize_t diagchar_write(struct file *file, const char __user *buf,
 		/*Drop the diag payload */
 		return -EIO;
 	}
-#endif
 #endif /* DIAG over USB */
 	if (pkt_type == DCI_DATA_TYPE) {
 		user_space_data = diagmem_alloc(driver, payload_size,
@@ -1812,11 +1755,7 @@ static ssize_t diagchar_write(struct file *file, const char __user *buf,
 		}
 
 		/* Check masks for On-Device logging */
-#ifdef CONFIG_HUAWEI_FEATURE_DIAG_MDLOG
-		if (driver->mask_check || driver->mixed_qmdlog_flag) {
-#else
 		if (driver->mask_check) {
-#endif
 			if (!mask_request_validate(driver->user_space_data_buf +
 							 token_offset)) {
 				pr_alert("diag: mask request Invalid\n");
@@ -1937,7 +1876,6 @@ static ssize_t diagchar_write(struct file *file, const char __user *buf,
 						 POOL_TYPE_HDLC);
 	if (!buf_hdlc) {
 		ret = -ENOMEM;
-		driver->used = 0;
 		goto fail_free_copy;
 	}
 	if (HDLC_OUT_BUF_SIZE < (2*payload_size) + 3) {
@@ -2401,6 +2339,7 @@ static int __init diagchar_init(void)
 	driver->rsp_buf_ctxt = SET_BUF_CTXT(APPS_DATA, SMD_CMD_TYPE, 1);
 	buf_hdlc_ctxt = SET_BUF_CTXT(APPS_DATA, SMD_DATA_TYPE, 1);
 	mutex_init(&driver->diagchar_mutex);
+	mutex_init(&driver->diag_file_mutex);
 	mutex_init(&driver->delayed_rsp_mutex);
 	init_waitqueue_head(&driver->wait_q);
 	init_waitqueue_head(&driver->smd_wait_q);

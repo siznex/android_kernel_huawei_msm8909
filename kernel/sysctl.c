@@ -65,10 +65,6 @@
 
 #include <asm/uaccess.h>
 #include <asm/processor.h>
-#ifdef CONFIG_HUAWEI_KERNEL
-#include <linux/qpnp/power-on.h>
-extern u32 huawei_pon_regs[MAX_REG_TYPE];
-#endif
 
 #ifdef CONFIG_X86
 #include <asm/nmi.h>
@@ -311,14 +307,16 @@ static struct ctl_table kern_table[] = {
 		.data		= &sysctl_sched_freq_inc_notify,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
 	},
 	{
 		.procname	= "sched_freq_dec_notify",
 		.data		= &sysctl_sched_freq_dec_notify,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
 	},
 	{
 		.procname       = "sched_migration_fixup",
@@ -397,7 +395,8 @@ static struct ctl_table kern_table[] = {
 		.data		= &sysctl_sched_spill_nr_run,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
 	},
 	{
 		.procname	= "sched_upmigrate",
@@ -952,17 +951,6 @@ static struct ctl_table kern_table[] = {
 		.extra1		= &zero,
 		.extra2		= &two,
 	},
-
-#ifdef CONFIG_HUAWEI_KERNEL
-	{
-		.procname	= "huawei_flow_level",
-		.data		= &KERNEL_HWFLOW,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-#endif
-
 #endif
 	{
 		.procname	= "ngroups_max",
@@ -1867,15 +1855,6 @@ static struct ctl_table debug_table[] = {
 		.extra2		= &one,
 	},
 #endif
-#ifdef CONFIG_HUAWEI_KERNEL
-    {
-            .procname   = "poweronoff_reason",
-            .data       = huawei_pon_regs,
-            .maxlen     = sizeof(huawei_pon_regs),
-            .mode       = 0644,
-            .proc_handler   = proc_dointvec,
-    },
-#endif	
 	{ }
 };
 

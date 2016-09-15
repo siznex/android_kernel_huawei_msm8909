@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -90,6 +90,7 @@
 #define DIAG_DIAG_POLL		0x03
 #define DIAG_DEL_RSP_WRAP	0x04
 #define DIAG_DEL_RSP_WRAP_CNT	0x05
+#define DIAG_EXT_MOBILE_ID	0x06
 
 #define DIAG_CMD_OP_LOG_DISABLE		0
 #define DIAG_CMD_OP_GET_LOG_RANGE	1
@@ -208,6 +209,14 @@ struct diag_pkt_header_t {
 	uint8_t cmd_code;
 	uint8_t subsys_id;
 	uint16_t subsys_cmd_code;
+} __packed;
+
+struct diag_cmd_ext_mobile_rsp_t {
+	struct diag_pkt_header_t header;
+	uint8_t version;
+	uint8_t padding[3];
+	uint32_t family;
+	uint32_t chip_id;
 } __packed;
 
 struct diag_master_table {
@@ -343,24 +352,6 @@ struct diag_smd_info {
 	 */
 	int (*process_smd_read_data)(struct diag_smd_info *smd_info,
 						void *buf, int num_bytes);
-	/*
-	 * add	buffer as buf_in_x to store data from buf_in_x then process it 
-	 * md_in_busy_1 used to indicate memory device store finished
-	 * usb_in_busy_x used to inidicate if data transfered by USB
-	 * usb_buf_in_x_ctxt used to store buffer number as buf_in_1_ctxt
-	 */
-#ifdef CONFIG_HUAWEI_FEATURE_DIAG_MDLOG
-		unsigned char *usb_buf_in_1;
-		unsigned char *usb_buf_in_2;
-		unsigned int usb_buf_in_1_size;
-		unsigned int usb_buf_in_2_size;
-		int md_in_busy_1;
-		int md_in_busy_2;
-		int usb_in_busy_1;
-		int usb_in_busy_2;
-		int usb_buf_in_1_ctxt;
-		int usb_buf_in_2_ctxt;
-#endif
 };
 
 struct diagchar_dev {
@@ -376,6 +367,7 @@ struct diagchar_dev {
 	struct device *diag_dev;
 	int ref_count;
 	struct mutex diagchar_mutex;
+	struct mutex diag_file_mutex;
 	wait_queue_head_t wait_q;
 	wait_queue_head_t smd_wait_q;
 	struct diag_client_map *client_map;
@@ -491,12 +483,6 @@ struct diagchar_dev {
 	unsigned char *cb_buf;
 	int cb_buf_len;
 #endif
-#ifdef CONFIG_HUAWEI_FEATURE_DIAG_MDLOG
-	int mixed_qmdlog_flag;
-	int mixed_qmdlog_pid;
-#endif
-
-
 };
 
 extern struct diagchar_dev *driver;
@@ -517,5 +503,6 @@ void diag_ws_on_copy_fail(int type);
 void diag_ws_on_copy_complete(int type);
 void diag_ws_reset(int type);
 void diag_ws_release(void);
+void chk_logging_wakeup(void);
 
 #endif

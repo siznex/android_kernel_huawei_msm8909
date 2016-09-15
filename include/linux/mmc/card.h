@@ -15,14 +15,6 @@
 #include <linux/mod_devicetable.h>
 #include <linux/notifier.h>
 
-#ifdef CONFIG_HUAWEI_EMMC_DSM
-#define EXT_CSD_PRE_EOL_INFO_NORMAL     0x01
-#define EXT_CSD_PRE_EOL_INFO_WARNING     0x02
-#define EXT_CSD_PRE_EOL_INFO_URGENT     0x03
-#endif
-
-#define EMMC_SAMSUNG_MANFID 0x15
-
 struct mmc_cid {
 	unsigned int		manfid;
 	char			prod_name[8];
@@ -92,7 +84,7 @@ struct mmc_ext_csd {
 	bool			hpi;			/* HPI support bit */
 	unsigned int		hpi_cmd;		/* cmd used as HPI */
 	bool			bkops;		/* background support bit */
-	bool			bkops_en;	/* background enable bit */
+	u8			bkops_en;	/* background enable bits */
 	unsigned int            data_sector_size;       /* 512 bytes or 4KB */
 	unsigned int            data_tag_unit_size;     /* DATA TAG UNIT size */
 	unsigned int		boot_ro_lock;		/* ro lock support */
@@ -115,11 +107,6 @@ struct mmc_ext_csd {
 	u8			raw_trim_mult;		/* 232 */
 	u8			raw_bkops_status;	/* 246 */
 	u8			raw_sectors[4];		/* 212 - 4 bytes */
-#ifdef CONFIG_HUAWEI_EMMC_DSM
-	u8			pre_eol_info;	/* 267 */
-	u8			device_life_time_est_typ_a;	/* 268 */
-	u8			device_life_time_est_typ_b;	/* 269 */
-#endif
 
 	unsigned int            feature_support;
 #define MMC_DISCARD_FEATURE	BIT(0)                  /* CMD38 feature */
@@ -399,9 +386,6 @@ struct mmc_card {
 	unsigned int		sd_bus_speed;	/* Bus Speed Mode set for the card */
 
 	struct dentry		*debugfs_root;
-#ifdef CONFIG_HUAWEI_KERNEL
-	struct dentry          *debugfs_sdxc;
-#endif
 	struct mmc_part	part[MMC_NUM_PHY_PARTITION]; /* physical partitions */
 	unsigned int    nr_parts;
 	unsigned int	part_curr;
@@ -416,6 +400,23 @@ struct mmc_card {
 	bool issue_long_pon;
 	u8 *cached_ext_csd;
 };
+
+/*
+ * mmc_csd registers get/set/clr helpers
+ */
+#define mmc_card_get_bkops_en_manual(card) ((card->ext_csd.bkops_en) &\
+					EXT_CSD_BKOPS_EN_MANUAL_EN)
+#define mmc_card_set_bkops_en_manual(card) ((card->ext_csd.bkops_en) |= \
+					EXT_CSD_BKOPS_EN_MANUAL_EN)
+#define mmc_card_clr_bkops_en_manual(card) ((card->ext_csd.bkops_en) &= \
+					~EXT_CSD_BKOPS_EN_MANUAL_EN)
+
+#define mmc_card_get_bkops_en_auto(card) ((card->ext_csd.bkops_en) & \
+					EXT_CSD_BKOPS_EN_AUTO_EN)
+#define mmc_card_set_bkops_en_auto(card) ((card->ext_csd.bkops_en) |= \
+					EXT_CSD_BKOPS_EN_AUTO_EN)
+#define mmc_card_clr_bkops_en_auto(card) ((card->ext_csd.bkops_en) &= \
+					~EXT_CSD_BKOPS_EN_AUTO_EN)
 
 /*
  * This function fill contents in mmc_part.
@@ -467,11 +468,7 @@ struct mmc_fixup {
 
 #define EXT_CSD_REV_ANY (-1u)
 
-#ifdef CONFIG_HUAWEI_KERNEL
-#define CID_MANFID_SANDISK	0x45
-#else
 #define CID_MANFID_SANDISK	0x2
-#endif
 #define CID_MANFID_TOSHIBA	0x11
 #define CID_MANFID_MICRON	0x13
 #define CID_MANFID_SAMSUNG	0x15

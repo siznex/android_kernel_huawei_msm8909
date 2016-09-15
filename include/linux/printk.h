@@ -405,8 +405,4 @@ static inline void oops_printk_start(void)
 }
 #endif
 
-#ifdef CONFIG_HUAWEI_KERNEL
-extern int KERNEL_HWFLOW;
-#endif
-
 #endif
